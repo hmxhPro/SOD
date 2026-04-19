@@ -1,0 +1,90 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Global ──────────────────────────────────────────────────────────────── */
+:root {
+  --color-accent:        #f97316;  /* orange-500 */
+  --color-accent-soft:   #fed7aa;  /* orange-200 */
+  --color-accent-dark:   #c2410c;  /* orange-700 */
+  --color-bg:            #ffffff;
+  --color-bg-muted:      #f8fafc;  /* slate-50 */
+  --color-card:          #ffffff;
+  --color-border:        #e2e8f0;  /* slate-200 */
+  --color-text:          #0f172a;  /* slate-900 */
+  --color-text-muted:    #64748b;  /* slate-500 */
+}
+
+html, body {
+  background-color: var(--color-bg-muted);
+  color: var(--color-text);
+  font-family: 'Inter', 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Scrollbar ────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: #e2e8f0;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover { background: #cbd5e1; }
+
+/* ── Frame card fade-in ───────────────────────────────────────────────────── */
+@keyframes slide-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.frame-card-enter { animation: slide-in 0.25s ease-out; }
+
+/* ── Progress bar glow ───────────────────────────────────────────────────── */
+@keyframes progress-glow {
+  0%, 100% { box-shadow: 0 0 4px rgba(249, 115, 22, 0.35); }
+  50%      { box-shadow: 0 0 14px rgba(249, 115, 22, 0.65); }
+}
+.progress-glow { animation: progress-glow 1.6s ease-in-out infinite; }
+
+/* ── Live status pulse ──────────────────────────────────────────────────── */
+@keyframes soft-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.4; }
+}
+.soft-pulse { animation: soft-pulse 1.4s ease-in-out infinite; }
+
+/* ── Drag-and-drop active state ──────────────────────────────────────────── */
+.drop-zone-active {
+  border-color: var(--color-accent) !important;
+  background-color: rgba(249, 115, 22, 0.06) !important;
+}
+
+/* ── Utilities ──────────────────────────────────────────────────────────── */
+.card {
+  background-color: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.text-gradient-brand {
+  background: linear-gradient(90deg, #f97316 0%, #fb923c 55%, #fdba74 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 500;
+}
