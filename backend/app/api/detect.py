@@ -156,13 +156,47 @@ async def stream_task(task_id: str):
         )
 
     async def event_generator():
+        # Heartbeat keeps SSE connections alive through any silent period
+        # (ZIP packaging for long videos can take minutes). 15 s is well
+        # below typical browser / proxy idle timeouts.
+        HEARTBEAT_SECONDS = 15.0
+        queue = task_manager._queues.get(task_id)
         try:
-            async for event_type, payload in task_manager.consume_stream(task_id):
+            while True:
+                if queue is None:
+                    # Queue was already cleaned up — fall through and stop.
+                    break
+                try:
+                    event_type, payload = await asyncio.wait_for(
+                        queue.get(), timeout=HEARTBEAT_SECONDS
+                    )
+                except asyncio.TimeoutError:
+                    # SSE comment line — ignored by EventSource but keeps
+                    # the TCP connection from being closed by proxies.
+                    yield ": keepalive\n\n"
+                    continue
+
                 if event_type == "frame":
                     evt = StreamEvent(
                         event_type="frame",
                         task_id=task_id,
                         frame_result=payload,
+                        progress=state.progress,
+                        total_frames=state.total_frames,
+                        processed_frames=state.processed_frames,
+                    )
+                elif event_type == "packaging":
+                    evt = StreamEvent(
+                        event_type="packaging",
+                        task_id=task_id,
+                        progress=1.0,
+                        total_frames=state.total_frames,
+                        processed_frames=state.processed_frames,
+                    )
+                elif event_type in ("paused", "resumed", "cancelled"):
+                    evt = StreamEvent(
+                        event_type=event_type,
+                        task_id=task_id,
                         progress=state.progress,
                         total_frames=state.total_frames,
                         processed_frames=state.processed_frames,
@@ -260,3 +294,92 @@ async def download_results(task_id: str):
         media_type="application/zip",
         filename=f"detection_results_{task_id[:8]}.zip",
     )
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# POST /api/task/{task_id}/cancel | pause | resume
+# ────────────────────────────────────────────────────────────────────────────
+
+_ACTIVE_STATUSES = {
+    TaskStatus.PENDING,
+    TaskStatus.RUNNING,
+    TaskStatus.PAUSED,
+}
+
+
+def _require_active_task(task_id: str) -> TaskState:
+    state = task_manager.get_task(task_id)
+    if state is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Task '{task_id}' not found.",
+        )
+    if state.status not in _ACTIVE_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Task is not active (status={state.status}).",
+        )
+    return state
+
+
+@router.post(
+    "/task/{task_id}/cancel",
+    summary="Request cancellation of a running detection task",
+)
+async def cancel_task(task_id: str) -> dict:
+    _require_active_task(task_id)
+    ok = task_manager.request_cancel(task_id)
+    if not ok:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cancel control unavailable for this task.",
+        )
+    return {"task_id": task_id, "action": "cancel", "status": "accepted"}
+
+
+@router.post(
+    "/task/{task_id}/pause",
+    summary="Pause a running detection task",
+)
+async def pause_task(task_id: str) -> dict:
+    state = _require_active_task(task_id)
+    if state.status == TaskStatus.PAUSED:
+        return {"task_id": task_id, "action": "pause", "status": "already_paused"}
+    if state.status != TaskStatus.RUNNING:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only running tasks can be paused.",
+        )
+    ok = task_manager.request_pause(task_id)
+    if not ok:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Pause control unavailable for this task.",
+        )
+    task_manager.set_paused(task_id)
+    await task_manager.push_paused(task_id)
+    return {"task_id": task_id, "action": "pause", "status": "accepted"}
+
+
+@router.post(
+    "/task/{task_id}/resume",
+    summary="Resume a paused detection task",
+)
+async def resume_task(task_id: str) -> dict:
+    state = _require_active_task(task_id)
+    if state.status == TaskStatus.RUNNING:
+        return {"task_id": task_id, "action": "resume", "status": "already_running"}
+    if state.status != TaskStatus.PAUSED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only paused tasks can be resumed.",
+        )
+    ok = task_manager.request_resume(task_id)
+    if not ok:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Resume control unavailable for this task.",
+        )
+    task_manager.set_resumed(task_id)
+    await task_manager.push_resumed(task_id)
+    return {"task_id": task_id, "action": "resume", "status": "accepted"}

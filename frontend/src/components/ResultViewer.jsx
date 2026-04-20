@@ -1,15 +1,21 @@
 /**
  * src/components/ResultViewer.jsx
  * ---------------------------------
- * Light-theme "live frame + history grid" viewer for a single task.
+ * Real-time detection viewer for a single task.
+ *
+ * Layout:
+ *   - Top: LIVE big view (auto-updates on every SSE frame event)
+ *   - Bottom: scrollable grid of "detected-target frames" (thumbnails)
+ *
+ * Thumbnail clicks bubble up via onOpenPreview(index) so the parent can
+ * display a full-screen FramePreview modal.
  */
 
-import React, { useRef, useEffect, useState } from 'react'
-import { Clock, Target, Hash } from 'lucide-react'
+import React, { useRef, useEffect } from 'react'
+import { Clock, Target, Hash, Maximize2 } from 'lucide-react'
 import { getFrameUrl } from '../services/api'
 
-// ── Single frame card ─────────────────────────────────────────────────────
-function FrameThumbnail({ frame, onClick, active }) {
+function FrameThumbnail({ frame, onClick, idx }) {
   const detCount = frame.detections?.length ?? 0
   const imgSrc = frame.taskId && frame.image_filename
     ? getFrameUrl(frame.taskId, frame.image_filename)
@@ -18,20 +24,21 @@ function FrameThumbnail({ frame, onClick, active }) {
       : null
   return (
     <button
-      onClick={() => onClick(frame)}
       type="button"
-      className={[
-        'frame-card-enter group relative rounded-lg overflow-hidden border transition-colors duration-150 focus:outline-none bg-white',
-        active ? 'border-brand-500 ring-2 ring-brand-200' : 'border-ink-200 hover:border-brand-400',
-      ].join(' ')}
+      onClick={() => onClick(idx)}
+      className="frame-card-enter group relative rounded-lg overflow-hidden border border-ink-200 hover:border-brand-400 bg-white transition-colors focus:outline-none focus:ring-2 focus:ring-brand-200"
+      title="点击放大"
     >
       <img
         src={imgSrc}
         alt={`Frame ${frame.frame_id}`}
-        className="w-full h-20 object-cover"
+        className="w-full h-24 object-cover"
         loading="lazy"
       />
-      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent px-2 py-1">
+      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/15 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
+        <Maximize2 size={16} className="text-white drop-shadow" />
+      </div>
+      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/75 to-transparent px-2 py-1">
         <p className="text-white text-[11px] font-mono truncate">{frame.timestamp}</p>
         {detCount > 0 && (
           <p className="text-brand-200 text-[11px]">{detCount} 个目标</p>
@@ -54,71 +61,89 @@ function DetectionBadge({ det }) {
   )
 }
 
-export default function ResultViewer({ latestFrame, allFrames, taskStatus }) {
-  const [selectedFrame, setSelectedFrame] = useState(null)
+export default function ResultViewer({
+  latestFrame,
+  allFrames = [],
+  taskStatus,
+  onOpenPreview,     // (idx: number) => void
+  onOpenLiveFrame,   // () => void  — enlarge the current live frame (not in history)
+}) {
   const gridRef = useRef(null)
 
   useEffect(() => {
     if (gridRef.current && taskStatus === 'running') {
       gridRef.current.scrollTop = gridRef.current.scrollHeight
     }
-  }, [allFrames?.length, taskStatus])
+  }, [allFrames.length, taskStatus])
 
-  const displayFrame = selectedFrame || latestFrame
-
-  if (!displayFrame && (!allFrames || allFrames.length === 0)) {
+  if (!latestFrame && allFrames.length === 0) {
     return (
-      <div className="flex items-center justify-center h-40 text-ink-400 border-2 border-dashed border-ink-200 rounded-xl bg-ink-50/60">
-        <p className="text-sm">暂无检测结果</p>
+      <div className="flex items-center justify-center h-32 text-ink-400 border-2 border-dashed border-ink-200 rounded-xl bg-ink-50/60">
+        <p className="text-sm">等待第一帧结果…</p>
       </div>
     )
   }
 
+  const liveDetCount = latestFrame?.detections?.length ?? 0
+
   return (
     <div className="flex flex-col gap-3">
-      {displayFrame && (
+      {/* ── Live view ───────────────────────────────────────────────────── */}
+      {latestFrame && (
         <div className="rounded-xl overflow-hidden border border-ink-200 bg-white">
           <div className="flex items-center justify-between px-4 py-2 bg-ink-50 border-b border-ink-200">
             <div className="flex items-center gap-3 text-xs">
-              <div className="flex items-center gap-1.5 text-brand-600">
+              <div className="flex items-center gap-1.5 text-brand-600 font-mono">
                 <Clock size={12} />
-                <span className="font-mono">{displayFrame.timestamp}</span>
+                <span>{latestFrame.timestamp}</span>
               </div>
               <div className="flex items-center gap-1.5 text-ink-500">
                 <Hash size={12} />
-                <span>帧 {displayFrame.frame_id}</span>
+                <span>帧 {latestFrame.frame_id}</span>
               </div>
               <div className="flex items-center gap-1.5 text-ink-500">
                 <Target size={12} />
-                <span>{displayFrame.detections?.length ?? 0} 个目标</span>
+                <span>{liveDetCount} 个目标</span>
               </div>
             </div>
-            {selectedFrame && (
-              <button
-                type="button"
-                onClick={() => setSelectedFrame(null)}
-                className="text-xs text-brand-600 hover:text-brand-500"
-              >
-                返回实时预览
-              </button>
-            )}
-            {taskStatus === 'running' && !selectedFrame && (
-              <span className="flex items-center gap-1.5 text-xs text-emerald-600">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 soft-pulse" />
-                实时检测中
-              </span>
-            )}
+
+            <div className="flex items-center gap-2">
+              {taskStatus === 'running' && (
+                <span className="flex items-center gap-1.5 text-xs text-emerald-600">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 soft-pulse" />
+                  实时检测中
+                </span>
+              )}
+              {onOpenLiveFrame && latestFrame.image_b64 && (
+                <button
+                  type="button"
+                  onClick={onOpenLiveFrame}
+                  className="flex items-center gap-1 px-2 py-1 rounded-lg text-ink-500 hover:text-brand-600 hover:bg-white text-xs"
+                  title="放大查看"
+                >
+                  <Maximize2 size={12} />
+                  放大
+                </button>
+              )}
+            </div>
           </div>
 
-          <img
-            src={`data:image/jpeg;base64,${displayFrame.image_b64}`}
-            alt={`Detection frame ${displayFrame.frame_id}`}
-            className="w-full object-contain max-h-[420px] bg-ink-900/90"
-          />
+          <button
+            type="button"
+            onClick={onOpenLiveFrame}
+            className="block w-full cursor-zoom-in bg-ink-900/90"
+            title="点击放大"
+          >
+            <img
+              src={`data:image/jpeg;base64,${latestFrame.image_b64}`}
+              alt={`Detection frame ${latestFrame.frame_id}`}
+              className="w-full object-contain max-h-[420px]"
+            />
+          </button>
 
-          {displayFrame.detections?.length > 0 && (
+          {liveDetCount > 0 && (
             <div className="px-4 py-3 flex flex-wrap gap-2 bg-white">
-              {displayFrame.detections.map((det, i) => (
+              {latestFrame.detections.map((det, i) => (
                 <DetectionBadge key={i} det={det} />
               ))}
             </div>
@@ -126,25 +151,24 @@ export default function ResultViewer({ latestFrame, allFrames, taskStatus }) {
         </div>
       )}
 
-      {allFrames && allFrames.length > 1 && (
+      {/* ── History (only detection-positive frames) ────────────────────── */}
+      {allFrames.length > 0 && (
         <div>
-          <h4 className="text-ink-500 text-xs mb-2">
-            历史帧 · {allFrames.length} 帧
+          <h4 className="text-ink-600 text-xs mb-2 flex items-center gap-1.5">
+            <Target size={12} className="text-brand-500" />
+            检测到目标的帧 · <span className="font-mono text-ink-800">{allFrames.length}</span>
+            <span className="text-ink-400">（点击缩略图放大）</span>
           </h4>
           <div
             ref={gridRef}
-            className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2 max-h-44 overflow-y-auto pr-1"
+            className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2 max-h-56 overflow-y-auto pr-1"
           >
-            {allFrames.map((frame) => (
+            {allFrames.map((frame, i) => (
               <FrameThumbnail
-                key={frame.frame_id}
+                key={`${frame.frame_id}-${i}`}
                 frame={frame}
-                active={selectedFrame?.frame_id === frame.frame_id}
-                onClick={(f) =>
-                  setSelectedFrame(
-                    f.frame_id === selectedFrame?.frame_id ? null : f
-                  )
-                }
+                idx={i}
+                onClick={onOpenPreview}
               />
             ))}
           </div>

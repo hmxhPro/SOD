@@ -18,8 +18,11 @@ from pydantic import BaseModel, Field
 class TaskStatus(str, Enum):
     PENDING = "pending"
     RUNNING = "running"
+    PAUSED = "paused"
+    PACKAGING = "packaging"
     FINISHED = "finished"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 # ────────────────────────────────────────────────────────────────────────────

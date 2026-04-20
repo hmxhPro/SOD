@@ -110,9 +110,22 @@ async def run_detection_pipeline(
             logger.exception(f"[{task_id}] Pipeline error: {exc}")
             task_manager.set_failed(task_id, str(exc))
             await task_manager.push_error(task_id, str(exc))
+            task_manager.cleanup_flags(task_id)
             return
 
+    # ── Cancel path: skip ZIP, emit cancelled, close stream ──────────────
+    if task_manager.is_cancelled(task_id):
+        task_manager.set_cancelled(task_id)
+        await task_manager.push_cancelled(task_id)
+        await task_manager.push_done(task_id)
+        task_manager.cleanup_flags(task_id)
+        logger.info(f"[{task_id}] Pipeline cancelled.")
+        return
+
     # ── Package ZIP ───────────────────────────────────────────────────────
+    # Notify clients first — ZIP packaging can take minutes for long videos
+    # and we don't want the SSE stream to look dead.
+    await task_manager.push_packaging(task_id)
     try:
         await asyncio.to_thread(
             _package_zip,
@@ -126,6 +139,7 @@ async def run_detection_pipeline(
         task_manager.set_failed(task_id, f"ZIP error: {exc}")
 
     await task_manager.push_done(task_id)
+    task_manager.cleanup_flags(task_id)
     logger.info(f"[{task_id}] Pipeline complete.")
 
 
@@ -165,6 +179,14 @@ def _sync_pipeline(
 
     try:
         while True:
+            # ── Pause / cancel control ─────────────────────────────────
+            # Block here while the task is paused; returns immediately
+            # if a cancel has been requested.
+            task_manager.wait_if_paused(task_id)
+            if task_manager.is_cancelled(task_id):
+                logger.info(f"[{task_id}] Cancelled at frame {frame_idx}.")
+                break
+
             ret, frame = cap.read()
             if not ret:
                 break

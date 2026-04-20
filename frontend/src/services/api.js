@@ -76,6 +76,33 @@ export async function getTask(taskId) {
 }
 
 /**
+ * Request cancellation of a running detection task.
+ * @param {string} taskId
+ */
+export async function cancelDetection(taskId) {
+  const { data } = await api.post(`/api/task/${taskId}/cancel`)
+  return data
+}
+
+/**
+ * Pause a running detection task.
+ * @param {string} taskId
+ */
+export async function pauseDetection(taskId) {
+  const { data } = await api.post(`/api/task/${taskId}/pause`)
+  return data
+}
+
+/**
+ * Resume a paused detection task.
+ * @param {string} taskId
+ */
+export async function resumeDetection(taskId) {
+  const { data } = await api.post(`/api/task/${taskId}/resume`)
+  return data
+}
+
+/**
  * Get the SSE stream URL for a task.
  * @param {string} taskId
  * @returns {string}

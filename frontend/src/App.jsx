@@ -31,17 +31,23 @@ export default function App() {
 
   const {
     tasks, addFiles, removeTask, clearAll, resetOne, startAll, startOne,
+    cancel, pause, resume,
   } = useDetectionTasks()
 
   const counts = useMemo(() => {
-    const c = { queued: 0, uploading: 0, running: 0, finished: 0, failed: 0, pending: 0 }
+    const c = {
+      queued: 0, uploading: 0, running: 0, paused: 0, packaging: 0,
+      finished: 0, failed: 0, cancelled: 0, pending: 0,
+    }
     for (const t of tasks) c[t.taskStatus] = (c[t.taskStatus] || 0) + 1
     return c
   }, [tasks])
 
   const hasWork = tasks.length > 0
-  const anyActive = ['uploading', 'pending', 'running'].some((s) => (counts[s] || 0) > 0)
-  const queuedOrFailed = (counts.queued || 0) + (counts.failed || 0)
+  const anyActive = ['uploading', 'pending', 'running', 'paused', 'packaging'].some(
+    (s) => (counts[s] || 0) > 0
+  )
+  const queuedOrFailed = (counts.queued || 0) + (counts.failed || 0) + (counts.cancelled || 0)
   const canStart = hasWork && prompt.trim().length > 0 && queuedOrFailed > 0 && !anyActive
 
   const handleStartAll = async () => {
@@ -246,7 +252,7 @@ export default function App() {
               >
                 {anyActive ? <Activity size={16} className="animate-pulse" /> : <Play size={16} />}
                 {anyActive
-                  ? `处理中…（${counts.running + counts.uploading + counts.pending} 个任务）`
+                  ? `处理中…（${counts.running + counts.uploading + counts.pending + counts.paused + counts.packaging} 个任务）`
                   : queuedOrFailed > 0
                   ? `开始检测（${queuedOrFailed} 个视频）`
                   : hasWork
@@ -264,7 +270,7 @@ export default function App() {
                 <div className="grid grid-cols-2 gap-y-2 gap-x-4">
                   <StatRow label="视频总数" value={tasks.length} />
                   <StatRow label="等待中" value={counts.queued || 0} tone="ink" />
-                  <StatRow label="进行中" value={(counts.uploading || 0) + (counts.pending || 0) + (counts.running || 0)} tone="brand" />
+                  <StatRow label="进行中" value={(counts.uploading || 0) + (counts.pending || 0) + (counts.running || 0) + (counts.packaging || 0)} tone="brand" />
                   <StatRow label="已完成" value={counts.finished || 0} tone="emerald" />
                   {counts.failed > 0 && (
                     <StatRow label="失败" value={counts.failed} tone="red" />
@@ -292,13 +298,16 @@ export default function App() {
                 </div>
               </div>
             ) : (
-              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4">
                 {tasks.map((t) => (
                   <TaskCard
                     key={t.id}
                     task={t}
                     onRemove={removeTask}
                     onRetry={handleRetry}
+                    onCancel={cancel}
+                    onPause={pause}
+                    onResume={resume}
                   />
                 ))}
               </div>

@@ -63,6 +63,23 @@ class RawDetection:
 # Abstract base
 # ────────────────────────────────────────────────────────────────────────────
 
+_UNK_PATTERN = re.compile(r'\[?unk\]?', re.IGNORECASE)
+
+
+def _parse_prompt_labels(prompt: str) -> List[str]:
+    """Split a prompt like 'person . car . dog' into individual class names."""
+    parts = re.split(r'[.。,，;；]', prompt)
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _clean_phrase(phrase: str, prompt_labels: List[str]) -> str:
+    """Replace garbled 'unk' phrases with the original prompt label."""
+    cleaned = phrase.strip()
+    if not cleaned or _UNK_PATTERN.search(cleaned):
+        return prompt_labels[0] if prompt_labels else "object"
+    return cleaned
+
+
 class BaseDetector(ABC):
     def __init__(self, device: str) -> None:
         self.device = device
@@ -161,6 +178,7 @@ class GroundingDINODetector(BaseDetector):
             )
 
         # boxes are [cx, cy, w, h] normalized → convert to absolute xyxy
+        prompt_labels = _parse_prompt_labels(prompt)
         results: List[RawDetection] = []
         for box, score, phrase in zip(boxes.cpu().numpy(), logits.cpu().numpy(), phrases):
             cx, cy, bw, bh = box
@@ -168,10 +186,11 @@ class GroundingDINODetector(BaseDetector):
             y1 = (cy - bh / 2) * h
             x2 = (cx + bw / 2) * w
             y2 = (cy + bh / 2) * h
+            label = _clean_phrase(phrase, prompt_labels)
             results.append(
                 RawDetection(
                     x1=float(x1), y1=float(y1), x2=float(x2), y2=float(y2),
-                    score=float(score), label=phrase,
+                    score=float(score), label=label,
                 )
             )
         return results
