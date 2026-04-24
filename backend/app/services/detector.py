@@ -85,6 +85,10 @@ class BaseDetector(ABC):
         self.device = device
         self._model = None
 
+    @property
+    def model(self):
+        return self._model
+
     @abstractmethod
     def load(self) -> None:
         """Load model weights into memory (idempotent)."""
@@ -131,6 +135,10 @@ class GroundingDINODetector(BaseDetector):
                 device=self.device,
             )
             self._model.eval()
+            # Workaround: some GroundingDINO versions omit `poss` from __init__,
+            # causing AttributeError on first forward pass.
+            if not hasattr(self._model, "poss"):
+                self._model.poss = []
             logger.info("Grounding DINO loaded successfully.")
         except ImportError:
             raise ImportError(
@@ -168,14 +176,29 @@ class GroundingDINODetector(BaseDetector):
             clean_prompt += "."
 
         with torch.no_grad():
-            boxes, logits, phrases = gdino_predict(
-                model=self._model,
-                image=image_tensor,
-                caption=clean_prompt,
-                box_threshold=box_threshold,
-                text_threshold=text_threshold,
-                device=self.device,
-            )
+            try:
+                boxes, logits, phrases = gdino_predict(
+                    model=self._model,
+                    image=image_tensor,
+                    caption=clean_prompt,
+                    box_threshold=box_threshold,
+                    text_threshold=text_threshold,
+                    device=self.device,
+                )
+            except AttributeError as e:
+                if "poss" in str(e):
+                    # Patch missing attribute and retry once
+                    self._model.poss = []
+                    boxes, logits, phrases = gdino_predict(
+                        model=self._model,
+                        image=image_tensor,
+                        caption=clean_prompt,
+                        box_threshold=box_threshold,
+                        text_threshold=text_threshold,
+                        device=self.device,
+                    )
+                else:
+                    raise
 
         # boxes are [cx, cy, w, h] normalized → convert to absolute xyxy
         prompt_labels = _parse_prompt_labels(prompt)

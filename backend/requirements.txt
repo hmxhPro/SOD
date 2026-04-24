@@ -11,10 +11,11 @@ websockets==12.0
 sse-starlette==2.1.0
 
 # Computer Vision & Detection
-torch>=2.1.0
-torchvision>=0.16.0
+# torch/torchvision: provided by NVIDIA container, do not install via pip
+# torch>=2.1.0
+# torchvision>=0.16.0
 transformers>=4.37,<5         # Florence-2 / Grounding DINO via HuggingFace
-timm>=0.9.16                   # Backbone models
+timm>=0.9.16                   # Backbone models (install with: pip install --no-deps timm>=0.9.16)
 supervision==0.20.0            # Detection utilities & visualization
 Pillow>=10.2.0
 opencv-python-headless>=4.9.0
