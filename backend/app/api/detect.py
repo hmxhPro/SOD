@@ -356,8 +356,9 @@ async def pause_task(task_id: str) -> dict:
             status_code=status.HTTP_409_CONFLICT,
             detail="Pause control unavailable for this task.",
         )
-    task_manager.set_paused(task_id)
-    await task_manager.push_paused(task_id)
+    success = await task_manager.set_paused(task_id)
+    if success:
+        await task_manager.push_paused(task_id)
     return {"task_id": task_id, "action": "pause", "status": "accepted"}
 
 
@@ -380,6 +381,7 @@ async def resume_task(task_id: str) -> dict:
             status_code=status.HTTP_409_CONFLICT,
             detail="Resume control unavailable for this task.",
         )
-    task_manager.set_resumed(task_id)
-    await task_manager.push_resumed(task_id)
+    success = await task_manager.set_resumed(task_id)
+    if success:
+        await task_manager.push_resumed(task_id)
     return {"task_id": task_id, "action": "resume", "status": "accepted"}

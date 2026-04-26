@@ -37,6 +37,8 @@ class TaskManager:
         self._pause_flags: Dict[str, threading.Event] = {}
         self._max_concurrent = max_concurrent
         self._semaphore: Optional[asyncio.Semaphore] = None
+        # Lock for thread-safe state mutations
+        self._state_lock = asyncio.Lock()
 
     # ── Public API ──────────────────────────────────────────────────────────
 
@@ -165,49 +167,60 @@ class TaskManager:
 
     # ── State helpers ────────────────────────────────────────────────────────
 
-    def set_running(self, task_id: str, total_frames: int) -> None:
-        state = self._tasks[task_id]
-        state.status = TaskStatus.RUNNING
-        state.total_frames = total_frames
-        logger.info(f"Task {task_id} started | total_frames={total_frames}")
-
-    def add_frame_result(self, task_id: str, frame: FrameResult) -> None:
-        state = self._tasks[task_id]
-        state.results.append(frame)
-        state.processed_frames += 1
-        state.progress = state.processed_frames / max(state.total_frames, 1)
-
-    def set_finished(self, task_id: str) -> None:
-        state = self._tasks[task_id]
-        state.status = TaskStatus.FINISHED
-        state.progress = 1.0
-        state.zip_ready = True
-        logger.info(f"Task {task_id} finished | frames={state.processed_frames}")
-
-    def set_paused(self, task_id: str) -> None:
-        state = self._tasks.get(task_id)
-        if state is not None and state.status == TaskStatus.RUNNING:
-            state.status = TaskStatus.PAUSED
-            logger.info(f"Task {task_id} paused | frames={state.processed_frames}")
-
-    def set_resumed(self, task_id: str) -> None:
-        state = self._tasks.get(task_id)
-        if state is not None and state.status == TaskStatus.PAUSED:
+    async def set_running(self, task_id: str, total_frames: int) -> None:
+        async with self._state_lock:
+            state = self._tasks[task_id]
             state.status = TaskStatus.RUNNING
-            logger.info(f"Task {task_id} resumed | frames={state.processed_frames}")
+            state.total_frames = total_frames
+            logger.info(f"Task {task_id} started | total_frames={total_frames}")
 
-    def set_cancelled(self, task_id: str) -> None:
-        state = self._tasks.get(task_id)
-        if state is None:
-            return
-        state.status = TaskStatus.CANCELLED
-        logger.info(f"Task {task_id} cancelled | frames={state.processed_frames}")
+    async def add_frame_result(self, task_id: str, frame: FrameResult) -> None:
+        async with self._state_lock:
+            state = self._tasks[task_id]
+            state.results.append(frame)
+            state.processed_frames += 1
+            state.progress = state.processed_frames / max(state.total_frames, 1)
 
-    def set_failed(self, task_id: str, error: str) -> None:
-        state = self._tasks[task_id]
-        state.status = TaskStatus.FAILED
-        state.error = error
-        logger.error(f"Task {task_id} failed: {error}")
+    async def set_finished(self, task_id: str) -> None:
+        async with self._state_lock:
+            state = self._tasks[task_id]
+            state.status = TaskStatus.FINISHED
+            state.progress = 1.0
+            state.zip_ready = True
+            logger.info(f"Task {task_id} finished | frames={state.processed_frames}")
+
+    async def set_paused(self, task_id: str) -> bool:
+        async with self._state_lock:
+            state = self._tasks.get(task_id)
+            if state is not None and state.status == TaskStatus.RUNNING:
+                state.status = TaskStatus.PAUSED
+                logger.info(f"Task {task_id} paused | frames={state.processed_frames}")
+                return True
+            return False
+
+    async def set_resumed(self, task_id: str) -> bool:
+        async with self._state_lock:
+            state = self._tasks.get(task_id)
+            if state is not None and state.status == TaskStatus.PAUSED:
+                state.status = TaskStatus.RUNNING
+                logger.info(f"Task {task_id} resumed | frames={state.processed_frames}")
+                return True
+            return False
+
+    async def set_cancelled(self, task_id: str) -> None:
+        async with self._state_lock:
+            state = self._tasks.get(task_id)
+            if state is None:
+                return
+            state.status = TaskStatus.CANCELLED
+            logger.info(f"Task {task_id} cancelled | frames={state.processed_frames}")
+
+    async def set_failed(self, task_id: str, error: str) -> None:
+        async with self._state_lock:
+            state = self._tasks[task_id]
+            state.status = TaskStatus.FAILED
+            state.error = error
+            logger.error(f"Task {task_id} failed: {error}")
 
     @property
     def semaphore(self) -> asyncio.Semaphore:

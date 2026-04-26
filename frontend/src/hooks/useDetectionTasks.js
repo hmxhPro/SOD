@@ -15,7 +15,7 @@
  *   - startOne(id, prompt, detectionInterval)
  */
 
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import {
   uploadVideo, startDetection, getStreamUrl, getTask,
   cancelDetection, pauseDetection, resumeDetection,
@@ -52,7 +52,21 @@ function newTask(file) {
 
 export function useDetectionTasks() {
   const [tasks, setTasks] = useState([])
+  const tasksRef = useRef([])
   const streamsRef = useRef(new Map()) // id -> EventSource
+
+  // Keep tasksRef in sync with tasks state
+  useEffect(() => {
+    tasksRef.current = tasks
+  }, [tasks])
+
+  // Cleanup all EventSource connections on unmount
+  useEffect(() => {
+    return () => {
+      streamsRef.current.forEach((es) => es.close())
+      streamsRef.current.clear()
+    }
+  }, [])
 
   const patchTask = useCallback((id, patch) => {
     setTasks((prev) =>
@@ -102,14 +116,21 @@ export function useDetectionTasks() {
 
   // ── SSE event handler ──────────────────────────────────────────────────
   const handleStreamEvent = useCallback((id, data) => {
+    // Validate data structure to prevent crashes on malformed SSE
+    if (!data || typeof data !== 'object') {
+      console.warn('Invalid SSE data received:', data)
+      return
+    }
+
     switch (data.event_type) {
       case 'frame':
         setTasks((prev) =>
           prev.map((t) => {
             if (t.id !== id) return t
             const fr = data.frame_result
-            const { image_b64: _drop, ...meta } = fr ?? {}
-            const hasDetection = (fr?.detections?.length ?? 0) > 0
+            if (!fr || typeof fr !== 'object') return t
+            const { image_b64: _drop, ...meta } = fr
+            const hasDetection = Array.isArray(fr.detections) && fr.detections.length > 0
             // If we're paused, a late frame should still update the preview
             // and counters but must NOT kick us back to "running".
             const nextStatus = t.taskStatus === 'paused' ? 'paused' : 'running'
@@ -181,12 +202,7 @@ export function useDetectionTasks() {
   // so a mid-stream disconnect (e.g. during slow ZIP packaging) does NOT
   // get misreported as "failed" on the client.
   const reconcileWithServer = useCallback(async (id) => {
-    const findTask = () => {
-      let found = null
-      setTasks((prev) => { found = prev.find((t) => t.id === id) ?? null; return prev })
-      return found
-    }
-    const t0 = findTask()
+    const t0 = tasksRef.current.find((t) => t.id === id)
     const taskId = t0?.taskId
     if (!taskId) {
       patchTask(id, { taskStatus: 'failed', error: '流连接已断开' })
@@ -258,7 +274,7 @@ export function useDetectionTasks() {
 
   // ── Run a single task through the full workflow ────────────────────────
   const runTask = useCallback(async (id, prompt, detectionInterval) => {
-    const current = tasks.find((t) => t.id === id)
+    const current = tasksRef.current.find((t) => t.id === id)
     if (!current || !current.file) return
 
     patchTask(id, { taskStatus: 'uploading', uploadProgress: 0, error: null })
@@ -296,18 +312,24 @@ export function useDetectionTasks() {
         // SSE can drop during long ZIP packaging even with heartbeats
         // (proxies, WiFi, sleep). Before declaring failure, ask the
         // server for the authoritative task state.
-        await reconcileWithServer(id)
+        try {
+          await reconcileWithServer(id)
+        } catch (err) {
+          patchTask(id, { taskStatus: 'failed', error: err.message || '流连接失败' })
+        }
       }
     } catch (err) {
       patchTask(id, { taskStatus: 'failed', error: err.message || String(err) })
     }
-  }, [tasks, patchTask, handleStreamEvent, reconcileWithServer])
+  }, [patchTask, handleStreamEvent, reconcileWithServer])
 
   // ── Public: start every queued task in parallel ────────────────────────
   const startAll = useCallback(async (prompt, detectionInterval) => {
-    const toStart = tasks.filter((t) =>
+    const toStart = tasksRef.current.filter((t) =>
       ['queued', 'failed', 'cancelled'].includes(t.taskStatus)
     )
+
+    // Reset non-queued tasks first
     for (const t of toStart) {
       if (t.taskStatus !== 'queued') {
         closeStream(t.id)
@@ -318,9 +340,18 @@ export function useDetectionTasks() {
         )
       }
     }
+
+    // Capture IDs before async operations to avoid stale references
     const ids = toStart.map((t) => t.id)
-    await Promise.all(ids.map((id) => runTask(id, prompt, detectionInterval)))
-  }, [tasks, runTask, closeStream])
+
+    // Validate tasks still exist before running
+    await Promise.all(
+      ids.map((id) => {
+        const exists = tasksRef.current.find((t) => t.id === id)
+        return exists ? runTask(id, prompt, detectionInterval) : Promise.resolve()
+      })
+    )
+  }, [runTask, closeStream])
 
   const startOne = useCallback((id, prompt, detectionInterval) => {
     return runTask(id, prompt, detectionInterval)
@@ -328,14 +359,8 @@ export function useDetectionTasks() {
 
   // ── Control actions: cancel / pause / resume ──────────────────────────
   const _getBackendTaskId = (id) => {
-    // Read the current (possibly-stale) snapshot without adding tasks to deps.
-    let taskId = null
-    setTasks((prev) => {
-      const t = prev.find((x) => x.id === id)
-      taskId = t?.taskId ?? null
-      return prev
-    })
-    return taskId
+    const t = tasksRef.current.find((x) => x.id === id)
+    return t?.taskId ?? null
   }
 
   const cancel = useCallback(async (id) => {

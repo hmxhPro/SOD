@@ -120,6 +120,10 @@ class GroundingDINODetector(BaseDetector):
     Config & checkpoint must exist at paths specified in settings.
     """
 
+    def __init__(self, device: str) -> None:
+        super().__init__(device)
+        self._predict_lock = __import__("threading").Lock()
+
     def load(self) -> None:
         if self._model is not None:
             return  # Already loaded
@@ -135,8 +139,7 @@ class GroundingDINODetector(BaseDetector):
                 device=self.device,
             )
             self._model.eval()
-            # Workaround: some GroundingDINO versions omit `poss` from __init__,
-            # causing AttributeError on first forward pass.
+            # Workaround: some GroundingDINO versions omit `poss` from __init__.
             if not hasattr(self._model, "poss"):
                 self._model.poss = []
             logger.info("Grounding DINO loaded successfully.")
@@ -157,6 +160,16 @@ class GroundingDINODetector(BaseDetector):
         from groundingdino.util.inference import predict as gdino_predict
         import groundingdino.datasets.transforms as T
 
+        if image is None or image.size == 0:
+            logger.warning("predict() received empty image, skipping.")
+            return []
+        if image.ndim != 3 or image.shape[2] != 3:
+            logger.warning(f"predict() unexpected image shape {image.shape}, skipping.")
+            return []
+        if image.shape[0] < 32 or image.shape[1] < 32:
+            logger.warning(f"predict() image too small {image.shape}, skipping.")
+            return []
+
         # Convert BGR (OpenCV) -> RGB PIL
         pil_image = Image.fromarray(image[:, :, ::-1])
         h, w = image.shape[:2]
@@ -175,30 +188,36 @@ class GroundingDINODetector(BaseDetector):
         if not clean_prompt.endswith("."):
             clean_prompt += "."
 
-        with torch.no_grad():
-            try:
-                boxes, logits, phrases = gdino_predict(
-                    model=self._model,
-                    image=image_tensor,
-                    caption=clean_prompt,
-                    box_threshold=box_threshold,
-                    text_threshold=text_threshold,
-                    device=self.device,
-                )
-            except AttributeError as e:
-                if "poss" in str(e):
-                    # Patch missing attribute and retry once
-                    self._model.poss = []
-                    boxes, logits, phrases = gdino_predict(
-                        model=self._model,
-                        image=image_tensor,
-                        caption=clean_prompt,
-                        box_threshold=box_threshold,
-                        text_threshold=text_threshold,
-                        device=self.device,
-                    )
-                else:
-                    raise
+        def _run_predict():
+            return gdino_predict(
+                model=self._model,
+                image=image_tensor,
+                caption=clean_prompt,
+                box_threshold=box_threshold,
+                text_threshold=text_threshold,
+                device=self.device,
+            )
+
+        # Thread-safe inference with lock to prevent model corruption
+        with self._predict_lock:
+            with torch.no_grad():
+                try:
+                    boxes, logits, phrases = _run_predict()
+                except AttributeError as e:
+                    err_msg = str(e)
+                    if "poss" in err_msg:
+                        self._model.poss = []
+                        boxes, logits, phrases = _run_predict()
+                    elif "features" in err_msg:
+                        # GroundingDINO version mismatch: model structure changed
+                        logger.warning(f"GroundingDINO AttributeError (features): {e}, skipping frame.")
+                        return []
+                    else:
+                        raise
+                except (IndexError, RuntimeError) as e:
+                    # backbone produced no feature maps (e.g. degenerate image after resize)
+                    logger.warning(f"GroundingDINO inference error: {e}, skipping frame.")
+                    return []
 
         # boxes are [cx, cy, w, h] normalized → convert to absolute xyxy
         prompt_labels = _parse_prompt_labels(prompt)

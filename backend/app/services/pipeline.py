@@ -78,11 +78,11 @@ async def run_detection_pipeline(
         info = get_video_info(video_path)
     except Exception as exc:
         logger.error(f"[{task_id}] Failed to read video: {exc}")
-        task_manager.set_failed(task_id, str(exc))
+        await task_manager.set_failed(task_id, str(exc))
         await task_manager.push_error(task_id, str(exc))
         return
 
-    task_manager.set_running(task_id, info["total_frames"])
+    await task_manager.set_running(task_id, info["total_frames"])
     logger.info(
         f"[{task_id}] Processing video: {video_path.name} | "
         f"frames={info['total_frames']} fps={info['fps']:.2f}"
@@ -108,14 +108,14 @@ async def run_detection_pipeline(
             )
         except Exception as exc:
             logger.exception(f"[{task_id}] Pipeline error: {exc}")
-            task_manager.set_failed(task_id, str(exc))
+            await task_manager.set_failed(task_id, str(exc))
             await task_manager.push_error(task_id, str(exc))
             task_manager.cleanup_flags(task_id)
             return
 
     # ── Cancel path: skip ZIP, emit cancelled, close stream ──────────────
     if task_manager.is_cancelled(task_id):
-        task_manager.set_cancelled(task_id)
+        await task_manager.set_cancelled(task_id)
         await task_manager.push_cancelled(task_id)
         await task_manager.push_done(task_id)
         task_manager.cleanup_flags(task_id)
@@ -133,10 +133,10 @@ async def run_detection_pipeline(
             task_results_dir=task_results_dir,
             task_state=task_manager.get_task(task_id),
         )
-        task_manager.set_finished(task_id)
+        await task_manager.set_finished(task_id)
     except Exception as exc:
         logger.error(f"[{task_id}] ZIP creation failed: {exc}")
-        task_manager.set_failed(task_id, f"ZIP error: {exc}")
+        await task_manager.set_failed(task_id, f"ZIP error: {exc}")
 
     await task_manager.push_done(task_id)
     task_manager.cleanup_flags(task_id)
@@ -256,7 +256,10 @@ def _sync_pipeline(
             )
 
             # ── Push to task queue (thread-safe) ──────────────────────────
-            task_manager.add_frame_result(task_id, frame_result)
+            asyncio.run_coroutine_threadsafe(
+                task_manager.add_frame_result(task_id, frame_result),
+                loop,
+            ).result()
             asyncio.run_coroutine_threadsafe(
                 task_manager.push_frame(task_id, frame_result),
                 loop,
