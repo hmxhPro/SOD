@@ -70,14 +70,18 @@ export default function App() {
       {/* ─── Header ─────────────────────────────────────────────────────── */}
       <header className="sticky top-0 z-30 backdrop-blur bg-white/80 border-b border-ink-200/70">
         <div className="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
-          <a href="#" className="flex items-center gap-2.5">
-            <span className="flex items-center justify-center w-9 h-9 rounded-xl bg-brand-500 text-white font-bold shadow-brand">
-              V
-            </span>
-            <span className="font-semibold text-ink-900 tracking-tight">
-              视频目标检测 <span className="text-brand-500">Agent</span>
-            </span>
-          </a>
+          <div className="flex items-center gap-4">
+            <img src="/科大logo.png" alt="科大" className="h-16 object-contain" />
+            <img src="/铁塔logo.jpg" alt="铁塔" className="h-16 object-contain" />
+            <a href="#" className="flex items-center gap-2.5">
+              <span className="flex items-center justify-center w-9 h-9 rounded-xl bg-brand-500 text-white font-bold shadow-brand">
+                V
+              </span>
+              <span className="font-semibold text-ink-900 tracking-tight">
+                视频目标检测 <span className="text-brand-500">Agent</span>
+              </span>
+            </a>
+          </div>
 
           <div className="flex items-center gap-4">
             <span className="hidden md:inline-flex items-center gap-2 text-xs text-emerald-600 bg-emerald-50 border border-emerald-100 px-3 py-1 rounded-full">

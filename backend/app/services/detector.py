@@ -128,6 +128,11 @@ class GroundingDINODetector(BaseDetector):
         if self._model is not None:
             return  # Already loaded
         try:
+            # Force offline mode to use local cache
+            import os
+            os.environ['HF_HUB_OFFLINE'] = '1'
+            os.environ['TRANSFORMERS_OFFLINE'] = '1'
+
             from groundingdino.util.inference import load_model as gdino_load_model
 
             logger.info(
